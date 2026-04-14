@@ -1,0 +1,6 @@
+pandas
+python-whois
+tldextract
+aiohttp
+playwright
+dnspython
