@@ -2,6 +2,7 @@ import csv
 import os
 import random
 import socket
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
@@ -124,8 +125,8 @@ USER_AGENTS = [
 
 SALLA_PLATFORMS = ["cdn.assets.salla.network", "cdn.salla.sa", "cdn.files.salla.network"]
 ZID_PLATFORMS = ["media.zid.store", "assets.zid.store"]
-ADFAZ = "تم التطوير بواسطة ادفاز | ADFAZ"
-MUTHRI = "تم التطوير بواسطة مثري | Muthri"
+ADFAZ = "تم التطوير بواسطة ادفاز"
+MUTHRI = "تم التطوير بواسطة مثري"
 LAK_PLATFORMS = ["تم التطوير بواسطة لك | LAK", "theme.lak.sa", "lak/tenants"]
 
 RETRIES = 2
@@ -390,12 +391,64 @@ def input_contains_salla_urls(input_path):
     return False
 
 
+def _split_input_rows(input_path):
+    salla_rows = []
+    other_rows = []
+    with open(input_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if not row:
+                continue
+            raw_url = str(row[0]).strip()
+            if not raw_url:
+                continue
+            if "salla.sa" in raw_url.lower():
+                salla_rows.append(row)
+            else:
+                other_rows.append(row)
+    return salla_rows, other_rows
+
+
+def _write_rows_to_temp_csv(rows):
+    temp_file = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8-sig", newline="", suffix=".csv", delete=False)
+    try:
+        writer = csv.writer(temp_file)
+        writer.writerows(rows)
+        temp_file.close()
+        return temp_file.name
+    except Exception:
+        temp_file.close()
+        os.unlink(temp_file.name)
+        raise
+
+
 def process_input_file(input_path=None, output_path=None, max_workers=15):
     input_path = input_path or DEFAULT_INPUT_FILE
-    if input_contains_salla_urls(input_path):
-        output_path = output_path or DEFAULT_CLEANED_FILE
-        return process_salla_stores(input_path, output_path, max_workers=max_workers)
-    return import_domains(input_path, output_path or DEFAULT_CLEANED_FILE)
+    output_path = output_path or DEFAULT_CLEANED_FILE
+
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    salla_rows, other_rows = _split_input_rows(input_path)
+    total_processed = 0
+
+    if other_rows:
+        temp_input = _write_rows_to_temp_csv(other_rows)
+        try:
+            count, _ = import_domains(temp_input, output_path)
+            total_processed += count
+        finally:
+            os.unlink(temp_input)
+
+    if salla_rows:
+        temp_input = _write_rows_to_temp_csv(salla_rows)
+        try:
+            _, _ = process_salla_stores(temp_input, output_path, max_workers=max_workers)
+            total_processed += len(salla_rows)
+        finally:
+            os.unlink(temp_input)
+
+    return total_processed, output_path
 
 
 def get_salla_store_handle(url):
