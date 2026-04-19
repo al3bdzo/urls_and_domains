@@ -58,6 +58,7 @@ def import_domains(input_path=None, output_path=None):
     df_new["platform"] = ""
     df_new["status"] = ""
     df_new["submitted"] = ""
+    df_new["phone_number"] = ""
 
     df_all = pd.concat([df_existing, df_new], ignore_index=True)
     df_all = df_all.drop_duplicates(subset=["domain"], keep="first")

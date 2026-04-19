@@ -7,4 +7,5 @@ DEFAULT_COLUMNS = [
     "platform",
     "status",
     "submitted",
+    "phone_number",
 ]
