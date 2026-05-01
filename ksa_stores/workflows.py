@@ -309,7 +309,7 @@ def detect_platforms(input_path=None, output_path=None, today=None, max_workers=
         # First check if domain is resolvable (DNS check)
         if not resolve_domain(domain):
             print(f"❌ {domain} is not resolvable (DNS failure)")
-            return index, "dead", "dead_domain"
+            return index, "", "dead_domain"
         
         session = get_session()
         response = safe_request(session, f"http://{domain}")
@@ -317,12 +317,17 @@ def detect_platforms(input_path=None, output_path=None, today=None, max_workers=
         # HTTP request failed completely
         if response is None:
             print(f"❌ HTTP check failed for {domain}")
-            return index, "dead", "dead_domain"
+            return index, "", "dead_domain"
         
-        # Check for HTTP errors (4xx/5xx) - 100% confident dead
+        # Check for HTTP 403 - Cloudflare or access denied (leave platform empty)
+        if response.status_code == 403:
+            print(f"🚫 {domain} → BLOCKED (HTTP 403)")
+            return index, "", "blocked"
+        
+        # Check for other HTTP errors (4xx/5xx) - 100% confident dead
         if response.status_code >= 400:
             print(f"❌ {domain} returned HTTP {response.status_code}")
-            return index, "dead", "dead_domain"
+            return index, "", "dead_domain"
         
         html = response.text
         platform = detect_platform(html)

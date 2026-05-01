@@ -18,16 +18,17 @@ def convert_json_to_csv():
             print("No data found in the 'buckets' field.")
             return
 
-        # Get headers from the first object keys
-        headers = buckets_data[0].keys()
+        # Extract only the 'key' column
+        urls = [item.get('key', '') for item in buckets_data if item.get('key')]
 
-        # Write to CSV
+        # Write to CSV - single column
         with open(output_filename, 'w', newline='', encoding='utf-8-sig') as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=headers)
-            writer.writeheader()
-            writer.writerows(buckets_data)
+            writer = csv.writer(csv_file)
+            writer.writerow(['url'])
+            for url in urls:
+                writer.writerow([url])
 
-        print(f"Success! {len(buckets_data)} rows written to {output_filename}")
+        print(f"Success! {len(urls)} URLs written to {output_filename}")
 
     except FileNotFoundError:
         print(f"Error: {input_filename} not found.")
