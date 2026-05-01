@@ -86,8 +86,7 @@ def submit_today_rows(input_path=None, output_path=None, today=None, dry_run=Fal
 
     mask = (
         (df_source["added_at"] == today)
-        & df_source["creation_date"].notna()
-        & df_source["platform"].astype(str).str.strip().ne("")
+        & df_source["platform"].isin(["zid", "lak", "muthri", "adfaz", "salla"])
         & df_source["submitted"].astype(str).str.strip().eq("")
     )
 
@@ -128,6 +127,37 @@ SALLA_PLATFORMS = ["cdn.assets.salla.network", "cdn.salla.sa", "cdn.files.salla.
 ZID_PLATFORMS = ["media.zid.store", "assets.zid.store"]
 ADFAZ = "تم التطوير بواسطة ادفاز"
 MUTHRI = "تم التطوير بواسطة مثري"
+
+# Signals that indicate this is likely an e-commerce site (not just a generic website)
+ECOMMERCE_SIGNALS = [
+    # Shopping-related
+    "add to cart", "add to basket", "add to bag",
+    "shopping cart", "shopping bag", "basket",
+    "buy now", "checkout",
+    "product price", "سعر", "ريال",
+    # Cart indicators
+    "cart", "basket", "bag",
+    # Common e-commerce platforms
+    "shopify", "woocommerce", "magento", "prestashop",
+    "bigcommerce", "squarespace", "wix",
+    # Payment methods
+    "visa", "mastercard", "mada", "apple pay", "stc pay",
+    # Arabic e-commerce
+    "متجر", "تسوق", "شراء", "سلة", "المنتجات",
+    "إضافة للسلة", "الدفع", "الشروط والأحكام",
+]
+
+
+def is_likely_ecommerce(html):
+    """Check if the site is likely an e-commerce site based on HTML content."""
+    if not html:
+        return False
+    html_lower = html.lower()
+    signal_count = sum(1 for signal in ECOMMERCE_SIGNALS if signal in html_lower)
+    # Consider it e-commerce if at least 2 signals are found
+    return signal_count >= 2
+
+
 LAK_PLATFORMS = ["تم التطوير بواسطة لك | LAK", "theme.lak.sa", "lak/tenants"]
 
 RETRIES = 2
@@ -234,7 +264,11 @@ def detect_platforms(input_path=None, output_path=None, today=None, max_workers=
         return None
 
     def detect_platform(html):
+        if not html:
+            return None
         html_lower = html.lower()
+        
+        # First check for known platforms
         if ADFAZ in html:
             return "adfaz"
         if MUTHRI in html:
@@ -245,7 +279,14 @@ def detect_platforms(input_path=None, output_path=None, today=None, max_workers=
             return "salla"
         if any(fp in html_lower for fp in ZID_PLATFORMS):
             return "zid"
-        return None
+        
+        # Check if it's likely an e-commerce site
+        if is_likely_ecommerce(html):
+            # It's e-commerce but not a known platform
+            return "unknown"
+        
+        # Not a recognized e-commerce platform
+        return "not_platform"
 
     def classify_status(response, html):
         if response is None:
@@ -264,22 +305,41 @@ def detect_platforms(input_path=None, output_path=None, today=None, max_workers=
     def process_row(index, row):
         domain = str(row["domain"]).strip()
         print(f"Checking platform for {domain}...")
+        
+        # First check if domain is resolvable (DNS check)
         if not resolve_domain(domain):
-            print(f"❌ {domain} is not resolvable")
-            return index, "", "dead_domain"
+            print(f"❌ {domain} is not resolvable (DNS failure)")
+            return index, "dead", "dead_domain"
+        
         session = get_session()
         response = safe_request(session, f"http://{domain}")
+        
+        # HTTP request failed completely
         if response is None:
             print(f"❌ HTTP check failed for {domain}")
-            return index, "", "dead_domain"
+            return index, "dead", "dead_domain"
+        
+        # Check for HTTP errors (4xx/5xx) - 100% confident dead
+        if response.status_code >= 400:
+            print(f"❌ {domain} returned HTTP {response.status_code}")
+            return index, "dead", "dead_domain"
+        
         html = response.text
         platform = detect_platform(html)
-        if platform:
+        
+        # Handle all platform cases including "not_platform" and "unknown"
+        if platform in ["adfaz", "muthri", "lak", "salla", "zid"]:
             print(f"✅ {domain} → PLATFORM: {platform}")
             return index, platform, "alive"
-        status = classify_status(response, html)
-        print(f"⚠️ {domain} → STATUS: {status}")
-        return index, "", status
+        elif platform in ["not_platform", "unknown"]:
+            print(f"⚠️ {domain} → PLATFORM: {platform}")
+            status = classify_status(response, html)
+            return index, platform, status
+        else:
+            # No platform detected (None)
+            status = classify_status(response, html)
+            print(f"⚠️ {domain} → STATUS: {status}")
+            return index, "", status
 
     mask = (df["added_at"] == today) & df["platform"].astype(str).str.strip().eq("")
     df_to_process = df[mask]
