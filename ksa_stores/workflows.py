@@ -309,6 +309,8 @@ def process_salla_stores(input_path, output_path=None, max_workers=15):
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
+    DUMMY_CREATION_DATE = date(2026, 1, 1)
+
     rows = []
     with open(input_path, "r", encoding="utf-8-sig", errors="ignore") as f:
         reader = csv.reader(f)
@@ -316,6 +318,7 @@ def process_salla_stores(input_path, output_path=None, max_workers=15):
             if not row:
                 continue
             raw_url = str(row[0]).strip()
+            source = str(row[1]).strip() if len(row) > 1 else "salla"
             if not raw_url:
                 continue
             normalized_url = raw_url if raw_url.startswith("http") else f"https://{raw_url}"
@@ -328,7 +331,7 @@ def process_salla_stores(input_path, output_path=None, max_workers=15):
                 continue
             handle = get_salla_store_handle(clean_url)
             if handle:
-                rows.append({"store_handle": handle, "full_url": clean_url})
+                rows.append({"store_handle": handle, "full_url": clean_url, "source": source})
 
     if not rows:
         print("⚠️ No Salla store URLs found in input file.")
@@ -353,8 +356,7 @@ def process_salla_stores(input_path, output_path=None, max_workers=15):
     df = pd.concat([df, formatted], axis=1)
     df["date_run"] = datetime.now().strftime("%Y-%m-%d")
 
-    final_df = df[["domain", "is_paid", "date_run"]].copy()
-    final_df["source"] = "salla"
+    final_df = df[["domain", "is_paid", "date_run", "source"]].copy()
     final_df["creation_date"] = ""
     final_df["age_years"] = ""
     final_df["added_at"] = date.today()
@@ -367,15 +369,20 @@ def process_salla_stores(input_path, output_path=None, max_workers=15):
     existing_df = ensure_columns(existing_df, DEFAULT_COLUMNS)
     existing_df["domain"] = existing_df["domain"].astype(str).str.strip()
 
-    final_df = pd.concat([existing_df, final_df], ignore_index=True)
-    final_df = final_df.drop_duplicates(subset=["domain"], keep="last")
+    existing_domains = set(existing_df["domain"].dropna())
+    new_domains = final_df[~final_df["domain"].isin(existing_domains)].copy()
+
+    new_domains.loc[new_domains["status"] == "unpaid", "creation_date"] = DUMMY_CREATION_DATE.strftime("%Y-%m-%d")
+
+    final_df = pd.concat([existing_df, new_domains], ignore_index=True)
+    final_df = final_df.drop_duplicates(subset=["domain"], keep="first")
     final_df = normalize_dates(final_df)
     final_df = normalize_text(final_df)
     final_df = sort_dataframe(final_df)
     save_csv(final_df, output_path)
 
-    print(f"✅ Salla import complete: saved {len(final_df)} cleaned rows to {output_path}")
-    return len(final_df), output_path
+    print(f"✅ Salla import complete: saved {len(new_domains)} new rows to {output_path}")
+    return len(new_domains), output_path
 
 
 def input_contains_salla_urls(input_path):

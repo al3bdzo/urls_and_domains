@@ -2,3 +2,5 @@ pandas
 python-whois
 tldextract
 aiohttp
+google-search-results
+python-dotenv

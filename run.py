@@ -8,12 +8,13 @@ from ksa_stores.workflows import (
     detect_platforms,
 )
 
+from serper.search import serper_search
 
 def main():
     parser = argparse.ArgumentParser(description="Run KSA Stores tasks")
     parser.add_argument(
         "command",
-        choices=["import", "submit", "dates", "platform"],
+        choices=["import", "submit", "dates", "platform", "serper"],
         help="Task to execute",
     )
     args = parser.parse_args()
@@ -30,6 +31,9 @@ def main():
     elif args.command == "platform":
         count, output_path = detect_platforms()
         print(f"✅ Updated platform/status for {count} row(s) in {output_path}")
+    elif args.command == "serper":
+        serper_search()
+
 
 
 if __name__ == "__main__":
